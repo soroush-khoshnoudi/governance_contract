@@ -1,16 +1,30 @@
+import { typeAbiParameterToPrimitiveType } from "@nomicfoundation/hardhat-viem/types";
 import {
     time,
     loadFixture,
 } from "@nomicfoundation/hardhat-toolbox-viem/network-helpers";
 import { expect } from "chai";
 import hre from "hardhat";
-import { getAddress, parseGwei } from "viem";
+import { encodeFunctionData, keccak256, toHex } from "viem";
 
-describe("Governor", function () {
-    async function deployGovernor() {
-        const [owner, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10] =
-            await hre.viem.getWalletClients();
+describe("CompanyGovernance", function () {
+    async function deployGovernance() {
+        const [
+            owner,
+            a1,
+            a2,
+            a3,
+            a4,
+            a5,
+            a6,
+            a7,
+            a8,
+            a9,
+            a10,
+            blockchainTeamAddress,
+        ] = await hre.viem.getWalletClients();
 
+        const Token = await hre.viem.deployContract("Token", []);
         const VotesToken = await hre.viem.deployContract("VotesToken", []);
         const TimeLock = await hre.viem.deployContract("TimeLock", [
             100,
@@ -19,10 +33,22 @@ describe("Governor", function () {
             owner.account.address,
         ]);
 
-        const Governor = await hre.viem.deployContract("MyGovernor", [
+        const Governance = await hre.viem.deployContract("CompanyGovernance", [
             VotesToken.address,
             TimeLock.address,
         ]);
+
+        await VotesToken.write.transfer([a1.account.address, 1n]);
+        await VotesToken.write.transfer([a2.account.address, 1n]);
+        await VotesToken.write.transfer([a3.account.address, 1n]);
+        await VotesToken.write.transfer([a4.account.address, 1n]);
+        await VotesToken.write.transfer([a5.account.address, 1n]);
+        await VotesToken.write.transfer([a6.account.address, 1n]);
+        await VotesToken.write.transfer([a7.account.address, 1n]);
+        await VotesToken.write.transfer([a8.account.address, 1n]);
+        await VotesToken.write.transfer([a9.account.address, 1n]);
+        await VotesToken.write.transfer([a10.account.address, 1n]);
+        let accounts = [a1, a2, a3, a4, a5, a6, a7, a8, a9, a10];
 
         const publicClient = await hre.viem.getPublicClient();
 
@@ -40,23 +66,82 @@ describe("Governor", function () {
             a10,
             VotesToken,
             TimeLock,
-            Governor,
+            Governance,
             publicClient,
+            blockchainTeamAddress,
+            Token,
         };
     }
 
     describe("deploy", () => {
-        it("should deploy Governor", async function () {
-            const { Governor, VotesToken, TimeLock } = await loadFixture(
-                deployGovernor
+        it("should deploy Governance", async function () {
+            const { Governance, VotesToken, TimeLock } = await loadFixture(
+                deployGovernance
             );
-            expect(await Governor.read.version()).to.equal("1");
-            expect(await Governor.read.votingDelay()).to.equal(86400n);
-            expect(await Governor.read.votingPeriod()).to.equal(604800n);
-            expect((await Governor.read.token()).toLowerCase()).to.equal(VotesToken.address);
-            expect((await Governor.read.timelock()).toLowerCase()).to.equal(TimeLock.address);
-            expect(await Governor.read.quorumNumerator()).to.equal(4n);
-            expect(await Governor.read.quorumDenominator()).to.equal(100n);
+            expect(await Governance.read.version()).to.equal("1");
+            expect(await Governance.read.votingDelay()).to.equal(86400n);
+            expect(await Governance.read.votingPeriod()).to.equal(604800n);
+            expect((await Governance.read.token()).toLowerCase()).to.equal(
+                VotesToken.address
+            );
+            expect((await Governance.read.timelock()).toLowerCase()).to.equal(
+                TimeLock.address
+            );
+            expect(await Governance.read.quorumNumerator()).to.equal(4n);
+            expect(await Governance.read.quorumDenominator()).to.equal(100n);
+        });
+    });
+    describe("test", () => {
+        it("should test Governance", async function () {
+            const { Governance, blockchainTeamAddress, Token } =
+                await loadFixture(deployGovernance);
+            const transferABI = {
+                constant: false,
+                inputs: [
+                    {
+                        name: "_to",
+                        type: "address",
+                    },
+                    {
+                        name: "_value",
+                        type: "uint256",
+                    },
+                ],
+                name: "transfer",
+                outputs: [
+                    {
+                        name: "",
+                        type: "bool",
+                    },
+                ],
+                payable: false,
+                stateMutability: "nonpayable",
+                type: "function",
+            };
+
+            const transferCalldata = encodeFunctionData({
+                functionName: "transfer",
+                abi: [transferABI],
+                args: [blockchainTeamAddress.account.address, 100n],
+            });
+
+            const description = "Give 100 token to Blockshain Team";
+
+            await Governance.write.propose([
+                [Token.address],
+                [0n],
+                [transferCalldata],
+                description,
+            ]);
+
+            const descriptionHash = keccak256(toHex(description));
+
+            await Governance.write.queue([
+                [Token.address],
+                [0n],
+                [transferCalldata],
+                descriptionHash,
+            ]);
         });
     });
 });
