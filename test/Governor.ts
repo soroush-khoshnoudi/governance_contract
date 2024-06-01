@@ -1,4 +1,3 @@
-import { typeAbiParameterToPrimitiveType } from "@nomicfoundation/hardhat-viem/types";
 import {
     time,
     loadFixture,
@@ -27,10 +26,10 @@ describe("CompanyGovernance", function () {
         const Token = await hre.viem.deployContract("Token", []);
         const VotesToken = await hre.viem.deployContract("VotesToken", []);
         const TimeLock = await hre.viem.deployContract("TimeLock", [
-            100,
+            0,
             [],
             [],
-            owner.account.address,
+            "0x0000000000000000000000000000000000000000",
         ]);
 
         const Governance = await hre.viem.deployContract("CompanyGovernance", [
@@ -93,8 +92,10 @@ describe("CompanyGovernance", function () {
     });
     describe("test", () => {
         it("should test Governance", async function () {
-            const { Governance, blockchainTeamAddress, Token } =
+            const { Governance, blockchainTeamAddress, Token,TimeLock } =
                 await loadFixture(deployGovernance);
+
+
             const transferABI = {
                 constant: false,
                 inputs: [
