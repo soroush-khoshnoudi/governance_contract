@@ -25,11 +25,12 @@ describe("CompanyGovernance", function () {
 
         const Token = await hre.viem.deployContract("Token", []);
         const VotesToken = await hre.viem.deployContract("VotesToken", []);
-        const TimeLock = await hre.viem.deployContract("TimeLock", [
-            0,
-            [],
-            [],
-            "0x0000000000000000000000000000000000000000",
+        const tokenDecimals = await VotesToken.read.decimals();
+        const TimeLock = await hre.viem.deployContract("GovernorTimeLock", [
+            1,
+            [owner.account.address],
+            [owner.account.address],
+            owner.account.address,
         ]);
 
         const Governance = await hre.viem.deployContract("CompanyGovernance", [
@@ -37,32 +38,39 @@ describe("CompanyGovernance", function () {
             TimeLock.address,
         ]);
 
-        await VotesToken.write.transfer([a1.account.address, 1n]);
-        await VotesToken.write.transfer([a2.account.address, 1n]);
-        await VotesToken.write.transfer([a3.account.address, 1n]);
-        await VotesToken.write.transfer([a4.account.address, 1n]);
-        await VotesToken.write.transfer([a5.account.address, 1n]);
-        await VotesToken.write.transfer([a6.account.address, 1n]);
-        await VotesToken.write.transfer([a7.account.address, 1n]);
-        await VotesToken.write.transfer([a8.account.address, 1n]);
-        await VotesToken.write.transfer([a9.account.address, 1n]);
-        await VotesToken.write.transfer([a10.account.address, 1n]);
-        let accounts = [a1, a2, a3, a4, a5, a6, a7, a8, a9, a10];
+        await Token.write.approve([TimeLock.address,100n])
+
+        const PROPOSER_ROLE = await TimeLock.read.PROPOSER_ROLE();
+        const EXECUTOR_ROLE = await TimeLock.read.EXECUTOR_ROLE();
+
+        await TimeLock.write.grantRole([PROPOSER_ROLE, Governance.address]);
+        await TimeLock.write.grantRole([EXECUTOR_ROLE, Governance.address]);
+
+        const allAccounts = [a1, a2, a3, a4, a5, a6, a7, a8, a9, a10];
+        for (const account of allAccounts) {
+            await VotesToken.write.transfer([
+                account.account.address,
+                BigInt(10 ** tokenDecimals),
+            ]);
+            const TokenAccount = await hre.viem.getContractAt(
+                "VotesToken",
+                VotesToken.address,
+                { client: { wallet: account } }
+            );
+            await TokenAccount.write.delegate([account.account.address]);
+        }
+
+        const againstAccount = [a8, a9, a10];
+        const forAccounts = [a1, a2, a3, a4, a5];
+        const abstainAccount = [a6, a7];
 
         const publicClient = await hre.viem.getPublicClient();
 
         return {
             owner,
-            a1,
-            a2,
-            a3,
-            a4,
-            a5,
-            a6,
-            a7,
-            a8,
-            a9,
-            a10,
+            againstAccount,
+            forAccounts,
+            abstainAccount,
             VotesToken,
             TimeLock,
             Governance,
@@ -92,13 +100,24 @@ describe("CompanyGovernance", function () {
     });
     describe("test", () => {
         it("should test Governance", async function () {
-            const { Governance, blockchainTeamAddress, Token,TimeLock } =
-                await loadFixture(deployGovernance);
-
-
+            const {
+                Governance,
+                blockchainTeamAddress,
+                Token,
+                TimeLock,
+                VotesToken,
+                abstainAccount,
+                againstAccount,
+                forAccounts,
+                owner
+            } = await loadFixture(deployGovernance);
             const transferABI = {
                 constant: false,
                 inputs: [
+                    {
+                        name: "_from",
+                        type: "address",
+                    },
                     {
                         name: "_to",
                         type: "address",
@@ -108,7 +127,7 @@ describe("CompanyGovernance", function () {
                         type: "uint256",
                     },
                 ],
-                name: "transfer",
+                name: "transferFrom",
                 outputs: [
                     {
                         name: "",
@@ -121,23 +140,70 @@ describe("CompanyGovernance", function () {
             };
 
             const transferCalldata = encodeFunctionData({
-                functionName: "transfer",
+                functionName: "transferFrom",
                 abi: [transferABI],
-                args: [blockchainTeamAddress.account.address, 100n],
+                args: [owner.account.address,blockchainTeamAddress.account.address, 100n],
             });
 
             const description = "Give 100 token to Blockshain Team";
-
             await Governance.write.propose([
                 [Token.address],
                 [0n],
                 [transferCalldata],
                 description,
             ]);
-
             const descriptionHash = keccak256(toHex(description));
+            const proposalId = await Governance.read.hashProposal([
+                [Token.address],
+                [0n],
+                [transferCalldata],
+                descriptionHash,
+            ]);
+            time.increase(24 * 60 * 60 + 1);
+
+            for (const account of forAccounts) {
+                const GovernanceAccount = await hre.viem.getContractAt(
+                    "CompanyGovernance",
+                    Governance.address,
+                    { client: { wallet: account } }
+                );
+                await GovernanceAccount.write.castVote([proposalId, 1]);
+            }
+
+            for (const account of againstAccount) {
+                const GovernanceAccount = await hre.viem.getContractAt(
+                    "CompanyGovernance",
+                    Governance.address,
+                    { client: { wallet: account } }
+                );
+                await GovernanceAccount.write.castVote([proposalId, 0]);
+            }
+
+            for (const account of abstainAccount) {
+                const GovernanceAccount = await hre.viem.getContractAt(
+                    "CompanyGovernance",
+                    Governance.address,
+                    { client: { wallet: account } }
+                );
+                await GovernanceAccount.write.castVote([proposalId, 2]);
+            }
+
+            time.increaseTo(
+                (await Governance.read.proposalDeadline([proposalId])) + 1n
+            );
+            // console.log(await Governance.read.state([proposalId]))
 
             await Governance.write.queue([
+                [Token.address],
+                [0n],
+                [transferCalldata],
+                descriptionHash,
+            ]);
+
+            time.increase(10);
+
+            console.log(await Token.read.allowance([owner.account.address,Governance.address])) 
+            await Governance.write.execute([
                 [Token.address],
                 [0n],
                 [transferCalldata],
