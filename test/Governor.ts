@@ -6,59 +6,34 @@ import { expect } from "chai";
 import hre from "hardhat";
 import { encodeFunctionData, keccak256, toHex } from "viem";
 
-describe("CompanyGovernance", function () {
-    async function deployGovernance() {
-        const [
-            owner,
-            a1,
-            a2,
-            a3,
-            a4,
-            a5,
-            a6,
-            a7,
-            a8,
-            a9,
-            a10,
-            blockchainTeamAddress,
-        ] = await hre.viem.getWalletClients();
+describe("DAO", function () {
+    async function deployDAO() {
+        const [owner, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10] =
+            await hre.viem.getWalletClients();
 
-        const Token = await hre.viem.deployContract("Token", []);
+        const Apollo = await hre.viem.deployContract("Apollo", []);
         const VotesToken = await hre.viem.deployContract("VotesToken", []);
-        const tokenDecimals = await VotesToken.read.decimals();
-        const TimeLock = await hre.viem.deployContract("GovernorTimeLock", [
+        const TimeLock = await hre.viem.deployContract("DAOTimeLock", [
             1,
             [owner.account.address],
             [owner.account.address],
             owner.account.address,
         ]);
 
-        const Governance = await hre.viem.deployContract("CompanyGovernance", [
+        const DAO = await hre.viem.deployContract("DAO", [
             VotesToken.address,
             TimeLock.address,
         ]);
 
-        await Token.write.approve([TimeLock.address,100n])
+        const tokenDecimals = await VotesToken.read.decimals();
 
         const PROPOSER_ROLE = await TimeLock.read.PROPOSER_ROLE();
         const EXECUTOR_ROLE = await TimeLock.read.EXECUTOR_ROLE();
 
-        await TimeLock.write.grantRole([PROPOSER_ROLE, Governance.address]);
-        await TimeLock.write.grantRole([EXECUTOR_ROLE, Governance.address]);
+        await TimeLock.write.grantRole([PROPOSER_ROLE, DAO.address]);
+        await TimeLock.write.grantRole([EXECUTOR_ROLE, DAO.address]);
 
         const allAccounts = [a1, a2, a3, a4, a5, a6, a7, a8, a9, a10];
-        for (const account of allAccounts) {
-            await VotesToken.write.transfer([
-                account.account.address,
-                BigInt(10 ** tokenDecimals),
-            ]);
-            const TokenAccount = await hre.viem.getContractAt(
-                "VotesToken",
-                VotesToken.address,
-                { client: { wallet: account } }
-            );
-            await TokenAccount.write.delegate([account.account.address]);
-        }
 
         const againstAccount = [a8, a9, a10];
         const forAccounts = [a1, a2, a3, a4, a5];
@@ -67,151 +42,245 @@ describe("CompanyGovernance", function () {
         const publicClient = await hre.viem.getPublicClient();
 
         return {
+            allAccounts,
             owner,
             againstAccount,
             forAccounts,
             abstainAccount,
             VotesToken,
             TimeLock,
-            Governance,
+            DAO,
             publicClient,
-            blockchainTeamAddress,
-            Token,
+            Apollo,
+            tokenDecimals,
         };
     }
 
-    describe("deploy", () => {
-        it("should deploy Governance", async function () {
-            const { Governance, VotesToken, TimeLock } = await loadFixture(
-                deployGovernance
-            );
-            expect(await Governance.read.version()).to.equal("1");
-            expect(await Governance.read.votingDelay()).to.equal(86400n);
-            expect(await Governance.read.votingPeriod()).to.equal(604800n);
-            expect((await Governance.read.token()).toLowerCase()).to.equal(
+    describe("Deploy", () => {
+        it("should deploy DAO", async function () {
+            const { DAO, VotesToken, TimeLock } = await loadFixture(deployDAO);
+            expect(await DAO.read.version()).to.equal("1");
+            expect(await DAO.read.votingDelay()).to.equal(86400n);
+            expect(await DAO.read.votingPeriod()).to.equal(604800n);
+            expect((await DAO.read.token()).toLowerCase()).to.equal(
                 VotesToken.address
             );
-            expect((await Governance.read.timelock()).toLowerCase()).to.equal(
+            expect((await DAO.read.timelock()).toLowerCase()).to.equal(
                 TimeLock.address
             );
-            expect(await Governance.read.quorumNumerator()).to.equal(4n);
-            expect(await Governance.read.quorumDenominator()).to.equal(100n);
+            expect(await DAO.read.quorumNumerator()).to.equal(4n);
+            expect(await DAO.read.quorumDenominator()).to.equal(100n);
         });
     });
-    describe("test", () => {
-        it("should test Governance", async function () {
+    describe("Test", () => {
+        it("test Create Proposal", async () => {
             const {
-                Governance,
-                blockchainTeamAddress,
-                Token,
-                TimeLock,
+                owner,
+                DAO,
                 VotesToken,
+                allAccounts,
                 abstainAccount,
                 againstAccount,
                 forAccounts,
-                owner
-            } = await loadFixture(deployGovernance);
-            const transferABI = {
-                constant: false,
-                inputs: [
-                    {
-                        name: "_from",
-                        type: "address",
-                    },
-                    {
-                        name: "_to",
-                        type: "address",
-                    },
-                    {
-                        name: "_value",
-                        type: "uint256",
-                    },
-                ],
-                name: "transferFrom",
-                outputs: [
-                    {
-                        name: "",
-                        type: "bool",
-                    },
-                ],
-                payable: false,
-                stateMutability: "nonpayable",
-                type: "function",
-            };
+                Apollo,
+                tokenDecimals,
+            } = await loadFixture(deployDAO);
 
-            const transferCalldata = encodeFunctionData({
-                functionName: "transferFrom",
-                abi: [transferABI],
-                args: [owner.account.address,blockchainTeamAddress.account.address, 100n],
-            });
+            const [apolloTakeOffCalldata, description, descriptionHash] =
+                getApolloInformation();
 
-            const description = "Give 100 token to Blockshain Team";
-            await Governance.write.propose([
-                [Token.address],
+            await DAO.write.propose([
+                [Apollo.address],
                 [0n],
-                [transferCalldata],
+                [apolloTakeOffCalldata],
                 description,
             ]);
-            const descriptionHash = keccak256(toHex(description));
-            const proposalId = await Governance.read.hashProposal([
-                [Token.address],
+
+            const proposalCreatedEvent = (
+                await DAO.getEvents.ProposalCreated()
+            )[0].args;
+
+            const proposalId = await DAO.read.hashProposal([
+                [Apollo.address],
                 [0n],
-                [transferCalldata],
+                [apolloTakeOffCalldata],
                 descriptionHash,
             ]);
-            time.increase(24 * 60 * 60 + 1);
 
-            for (const account of forAccounts) {
-                const GovernanceAccount = await hre.viem.getContractAt(
-                    "CompanyGovernance",
-                    Governance.address,
+            expect(proposalId).to.be.equal(proposalCreatedEvent.proposalId);
+            expect(proposalCreatedEvent.proposer.toLowerCase()).to.be.equal(
+                owner.account.address
+            );
+            expect(proposalCreatedEvent.targets[0].toLowerCase()).to.be.equal(
+                Apollo.address
+            );
+            expect(proposalCreatedEvent.values[0]).to.be.equal(0n);
+            expect(proposalCreatedEvent.calldatas[0]).to.be.equal(
+                apolloTakeOffCalldata
+            );
+            expect(proposalCreatedEvent.voteEnd).to.be.equal(
+                proposalCreatedEvent.voteStart + BigInt(7 * 24 * 60 * 60)
+            );
+            expect(proposalCreatedEvent.description).to.be.equal(description);
+        });
+        it("should test DAO", async function () {
+            const {
+                DAO,
+                VotesToken,
+                allAccounts,
+                abstainAccount,
+                againstAccount,
+                forAccounts,
+                Apollo,
+                tokenDecimals,
+            } = await loadFixture(deployDAO);
+
+            for (const account of allAccounts) {
+                await VotesToken.write.transfer([
+                    account.account.address,
+                    BigInt(10 ** tokenDecimals),
+                ]);
+                const TokenAccount = await hre.viem.getContractAt(
+                    "VotesToken",
+                    VotesToken.address,
                     { client: { wallet: account } }
                 );
-                await GovernanceAccount.write.castVote([proposalId, 1]);
+                await TokenAccount.write.delegate([account.account.address]);
+                expect(
+                    (
+                        await TokenAccount.read.delegates([
+                            account.account.address,
+                        ])
+                    ).toLowerCase()
+                ).to.be.equal(account.account.address);
+            }
+
+            const [apolloTakeOffCalldata, description, descriptionHash] =
+                getApolloInformation();
+
+            await DAO.write.propose([
+                [Apollo.address],
+                [0n],
+                [apolloTakeOffCalldata],
+                description,
+            ]);
+
+            const proposalCreatedEvent = (
+                await DAO.getEvents.ProposalCreated()
+            )[0].args;
+
+            const proposalId = await DAO.read.hashProposal([
+                [Apollo.address],
+                [0n],
+                [apolloTakeOffCalldata],
+                descriptionHash,
+            ]);
+
+            // proposalCreatedEvent[0] = {
+            //   proposalId: 65111842886499006094291420430648087626988677476062755531843499691882875319926n,
+            //   proposer: '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266',
+            //   targets: [Array],
+            //   values: [Array],
+            //   signatures: [Array],
+            //   calldatas: [Array],
+            //   voteStart: 1717495068n,
+            //   voteEnd: 1718099868n,
+            //   description: 'Send Apollo to the moon?'
+            // }
+            expect(proposalId).to.be.equal(proposalCreatedEvent.proposalId);
+
+            time.increaseTo(proposalCreatedEvent.voteStart + 3600n);
+
+            for (const account of forAccounts) {
+                const DAOAccount = await hre.viem.getContractAt(
+                    "DAO",
+                    DAO.address,
+                    { client: { wallet: account } }
+                );
+                await DAOAccount.write.castVote([proposalId, 1]);
+                expect(
+                    await DAO.read.hasVoted([
+                        proposalId,
+                        account.account.address,
+                    ])
+                ).to.be.equal(true);
             }
 
             for (const account of againstAccount) {
-                const GovernanceAccount = await hre.viem.getContractAt(
-                    "CompanyGovernance",
-                    Governance.address,
+                const DAOAccount = await hre.viem.getContractAt(
+                    "DAO",
+                    DAO.address,
                     { client: { wallet: account } }
                 );
-                await GovernanceAccount.write.castVote([proposalId, 0]);
+                await DAOAccount.write.castVote([proposalId, 0]);
+                expect(
+                    await DAO.read.hasVoted([
+                        proposalId,
+                        account.account.address,
+                    ])
+                ).to.be.equal(true);
             }
 
             for (const account of abstainAccount) {
-                const GovernanceAccount = await hre.viem.getContractAt(
-                    "CompanyGovernance",
-                    Governance.address,
+                const DAOAccount = await hre.viem.getContractAt(
+                    "DAO",
+                    DAO.address,
                     { client: { wallet: account } }
                 );
-                await GovernanceAccount.write.castVote([proposalId, 2]);
+                await DAOAccount.write.castVote([proposalId, 2]);
+                expect(
+                    await DAO.read.hasVoted([
+                        proposalId,
+                        account.account.address,
+                    ])
+                ).to.be.equal(true);
             }
 
             time.increaseTo(
-                (await Governance.read.proposalDeadline([proposalId])) + 1n
+                (await DAO.read.proposalDeadline([proposalId])) + 1n
             );
-            // console.log(await Governance.read.state([proposalId]))
+            // console.log(await DAO.read.state([proposalId]))
 
-            await Governance.write.queue([
-                [Token.address],
+            await DAO.write.queue([
+                [Apollo.address],
                 [0n],
-                [transferCalldata],
+                [apolloTakeOffCalldata],
                 descriptionHash,
             ]);
 
             time.increase(10);
 
-            console.log(await Token.read.allowance([owner.account.address,Governance.address])) 
-            await Governance.write.execute([
-                [Token.address],
+            expect(await Apollo.read.apolloTakenOff()).to.be.equal(false);
+
+            await DAO.write.execute([
+                [Apollo.address],
                 [0n],
-                [transferCalldata],
+                [apolloTakeOffCalldata],
                 descriptionHash,
             ]);
+
+            expect(await Apollo.read.apolloTakenOff()).to.be.equal(true);
         });
     });
 });
+
+const getApolloInformation = (): [`0x${string}`, string, `0x${string}`] => {
+    const apolloTakeOffCalldata = encodeFunctionData({
+        functionName: "takeOff",
+        abi: [
+            {
+                inputs: [],
+                name: "takeOff",
+                outputs: [],
+                stateMutability: "nonpayable",
+                type: "function",
+            },
+        ],
+    });
+    const description = "Send Apollo to the moon?";
+    const descriptionHash = keccak256(toHex(description));
+    return [apolloTakeOffCalldata, description, descriptionHash];
+};
 
 // describe("Deployment", function () {
 //     it("Should set the right unlockTime", async function () {
