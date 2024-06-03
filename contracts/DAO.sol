@@ -14,7 +14,7 @@ contract DAO is Governor, GovernorSettings, GovernorCountingSimple, GovernorVote
         Governor("DAO")
         GovernorSettings(1 days, 1 weeks, 0)
         GovernorVotes(_token)
-        GovernorVotesQuorumFraction(4)
+        GovernorVotesQuorumFraction(40)
         GovernorTimelockControl(_timelock)
     {}
 

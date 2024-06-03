@@ -68,7 +68,7 @@ describe("DAO", function () {
             expect((await DAO.read.timelock()).toLowerCase()).to.equal(
                 TimeLock.address
             );
-            expect(await DAO.read.quorumNumerator()).to.equal(4n);
+            expect(await DAO.read.quorumNumerator()).to.equal(40n);
             expect(await DAO.read.quorumDenominator()).to.equal(100n);
         });
     });
@@ -123,6 +123,7 @@ describe("DAO", function () {
             );
             expect(proposalCreatedEvent.description).to.be.equal(description);
         });
+
         it("should test DAO", async function () {
             const {
                 DAO,
@@ -189,6 +190,16 @@ describe("DAO", function () {
             // }
             expect(proposalId).to.be.equal(proposalCreatedEvent.proposalId);
 
+            let state = await DAO.read.state([proposalId]);
+            console.log("\tCurrent state of proposal = Pending",state);
+
+            console.log(
+                `\tquorum : ${
+                    (await DAO.read.quorum([(await time.latest()) - 1])) /
+                    BigInt(10 ** tokenDecimals)
+                }`
+            );
+
             time.increaseTo(proposalCreatedEvent.voteStart + 3600n);
 
             for (const account of forAccounts) {
@@ -236,10 +247,33 @@ describe("DAO", function () {
                 ).to.be.equal(true);
             }
 
+            state = await DAO.read.state([proposalId]);
+            console.log("\tCurrent state of proposal = Active",state);
+
+            await expect(
+                DAO.write.queue([
+                    [Apollo.address],
+                    [0n],
+                    [apolloTakeOffCalldata],
+                    descriptionHash,
+                ])
+            ).to.be.Throw;
+
+            const proposalVotes = await DAO.read.proposalVotes([proposalId]);
+
+            console.log(
+                `\tagainstVotes : ${
+                    proposalVotes[0] / BigInt(10 ** tokenDecimals)
+                }\n\tforVotes : ${
+                    proposalVotes[1] / BigInt(10 ** tokenDecimals)
+                }\n\tabstainVotes : ${
+                    proposalVotes[2] / BigInt(10 ** tokenDecimals)
+                }`
+            );
+
             time.increaseTo(
                 (await DAO.read.proposalDeadline([proposalId])) + 1n
             );
-            // console.log(await DAO.read.state([proposalId]))
 
             await DAO.write.queue([
                 [Apollo.address],
@@ -247,6 +281,9 @@ describe("DAO", function () {
                 [apolloTakeOffCalldata],
                 descriptionHash,
             ]);
+
+            state = await DAO.read.state([proposalId]);
+            console.log("\tCurrent state of proposal = Queued",state);
 
             time.increase(10);
 
@@ -258,6 +295,9 @@ describe("DAO", function () {
                 [apolloTakeOffCalldata],
                 descriptionHash,
             ]);
+
+            state = await DAO.read.state([proposalId]);
+            console.log("\tCurrent state of proposal = Executed",state);
 
             expect(await Apollo.read.apolloTakenOff()).to.be.equal(true);
         });
